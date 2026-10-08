@@ -2,27 +2,29 @@ import React from 'react';
 import {
   Clinic,
   OrderRecord,
-  STATUS_STEPS,
   getFedexTrackingUrl,
   getSagawaTrackingUrl
 } from '../data/clinicsData';
 import {
-  Hospital,
   MapPin,
   Phone,
   User,
-  Truck,
   Plane,
-  Clock,
-  CheckCircle2,
+  Truck,
   FileText,
   ExternalLink,
-  ShieldAlert,
-  ShieldCheck,
   ChevronRight,
-  Eye,
-  AlertCircle
+  AlertCircle,
+  Package,
 } from 'lucide-react';
+import {
+  Card,
+  SectionTitle,
+  StatusChip,
+  StageBar,
+  DateCell,
+  formatDate,
+} from './statusUi';
 
 interface ClinicPortalViewProps {
   clinic: Clinic;
@@ -37,314 +39,272 @@ export const ClinicPortalView: React.FC<ClinicPortalViewProps> = ({
   onOpenTracking,
   onOpenDeliverySlip,
 }) => {
-  const currentOrder = clinicOrders.find((o) => o.batchId === '2026-10') || clinicOrders[0];
-  const pastOrders = clinicOrders.filter((o) => o.id !== currentOrder?.id);
+  // 新しい発注便から順に並べ、先頭を「最新の発注便」として扱う
+  const sortedOrders = [...clinicOrders].sort((a, b) => b.batchId.localeCompare(a.batchId));
+  const currentOrder = sortedOrders[0];
+  const pastOrders = sortedOrders.slice(1);
 
-  const currentStepObj = currentOrder
-    ? STATUS_STEPS.find((s) => s.key === currentOrder.status) || STATUS_STEPS[0]
-    : null;
   const isDelivered = currentOrder?.status === 'DELIVERED';
+  const heroDate = currentOrder
+    ? formatDate(isDelivered ? currentOrder.actualDelivery : currentOrder.estimatedDelivery)
+    : null;
 
   return (
-    <div className="space-y-6">
-      {/* Clinic Header Profile Banner */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0 text-blue-600 shadow-xs">
-              <Hospital className="w-7 h-7" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
-                  {clinic.region}エリア
-                </span>
-                <span className="text-xs font-mono text-slate-500">
-                  クリニックID: {clinic.id}
-                </span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                  {clinic.hub}ハブ直行便
-                </span>
-              </div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
-                {clinic.name}
-              </h1>
-              {clinic.nameEn && (
-                <div className="text-xs font-mono text-slate-500">{clinic.nameEn}</div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs space-y-1.5 min-w-[260px]">
-            <div className="flex items-center gap-1.5 text-slate-700">
-              <User className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-slate-500">院長:</span>
-              <span className="font-bold text-slate-900">{clinic.doctor || '—'} 先生</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-slate-700">
-              <Phone className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-slate-500">TEL:</span>
-              <span className="font-mono text-slate-900">{clinic.tel}</span>
-            </div>
-            <div className="flex items-start gap-1.5 text-slate-700">
-              <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
-              <span className="text-slate-600 leading-snug">
-                〒{clinic.zip} {clinic.address}
-              </span>
-            </div>
-          </div>
+    <div className="space-y-4">
+      {/* 1. 最新の発注便: いつ届くか */}
+      <Card className="p-5 sm:p-6">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          <span className="font-medium">{clinic.region}</span>
+          <span className="text-slate-300">|</span>
+          <span>{clinic.hub === 'NRT' ? '成田経由(東日本)' : '関西経由(西日本)'}</span>
         </div>
-      </div>
+        <h1 className="mt-1 text-2xl sm:text-3xl font-bold text-slate-900">{clinic.name}</h1>
 
-      {/* Active Shipment Section */}
-      {currentOrder && currentStepObj && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="bg-slate-800 text-white p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-wider text-sky-200 bg-slate-700 border border-slate-600 px-2 py-0.5 rounded">
-                最新配送便 (10月1日ご発注)
-              </span>
-              <h2 className="text-lg sm:text-xl font-bold mt-1 text-white">
-                自院宛 美容医療薬剤 配送状況
-              </h2>
-            </div>
-            <div className="text-right">
-              <div className="text-xs text-slate-300">インボイス番号:</div>
-              <div className="text-base font-bold font-mono text-sky-200">
-                {currentOrder.invoiceNo}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-5 sm:p-6 space-y-6">
-            {/* Status Hero Card */}
-            <div className="bg-slate-50/70 rounded-xl p-5 border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
-                    isDelivered ? 'bg-emerald-600 text-white' : 'bg-sky-600 text-white'
-                  }`}
-                >
-                  {isDelivered ? (
-                    <CheckCircle2 className="w-6 h-6" />
-                  ) : (
-                    <Truck className="w-6 h-6" />
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
+        {currentOrder ? (
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-slate-500">
+                  {currentOrder.batchName}の配送状況
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-3">
+                  {heroDate && (
                     <span
-                      className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${currentStepObj.bgLight} ${currentStepObj.textColor} ${currentStepObj.borderLight}`}
+                      className={`text-2xl sm:text-3xl font-bold tabular-nums ${
+                        isDelivered ? 'text-emerald-700' : 'text-blue-700'
+                      }`}
                     >
-                      {currentStepObj.label}
+                      {heroDate.md}
+                      <span className="text-xl sm:text-2xl">({heroDate.wd})</span>
+                      {heroDate.time && (
+                        <span className="ml-1 text-xl sm:text-2xl">{heroDate.time}</span>
+                      )}
                     </span>
-                    <span className="text-xs font-bold text-slate-500">
-                      STEP {currentStepObj.step + 1}/8
-                    </span>
-                  </div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-1">
-                    {currentStepObj.desc}
-                  </h3>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    シンガポール出荷 ➔ FedEx国際空輸 ➔ {currentOrder.hubName} ➔ 佐川急便
-                  </p>
+                  )}
+                  <span className="text-2xl sm:text-3xl font-bold text-slate-900">
+                    {isDelivered ? '受領済' : '到着予定'}
+                  </span>
                 </div>
               </div>
-
-              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs self-stretch md:self-auto text-left md:text-right">
-                <div className="text-xs text-slate-500 font-medium">
-                  {isDelivered ? '納品完了日時' : 'クリニック到着予定'}
-                </div>
-                <div className="text-lg font-black text-slate-900 font-mono mt-0.5">
-                  {isDelivered ? currentOrder.actualDelivery : currentOrder.estimatedDelivery}
-                </div>
-                <div className="text-xs text-cyan-800 font-medium mt-0.5 flex items-center md:justify-end gap-1">
-                  佐川急便 (午前中配送指定)
-                </div>
+              <div className="flex items-center gap-2">
+                <StatusChip status={currentOrder.status} size="md" />
               </div>
             </div>
 
-            {/* Tracking Numbers & Direct Trackers */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 bg-purple-50/70 border border-purple-200 rounded-xl">
-                <div className="text-xs font-bold text-purple-900 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Plane className="w-4 h-4 text-purple-600" />
-                    FedEx 国際航空便追跡 (シンガポール発)
-                  </span>
-                  <span className="text-[10px] bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded font-mono">
-                    FX5288便
-                  </span>
-                </div>
-                <div className="mt-2 text-lg font-black font-mono text-purple-950">
-                  {currentOrder.fedexTracking}
-                </div>
-                <div className="mt-2 pt-2 border-t border-purple-200 flex items-center justify-between text-xs">
-                  <span className="text-purple-700 text-[11px]">国際優先輸送</span>
-                  <a
-                    href={getFedexTrackingUrl(currentOrder.fedexTracking)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-purple-800 font-bold hover:underline flex items-center gap-1"
-                  >
-                    FedEx公式サイトで追跡 <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              </div>
+            <StageBar status={currentOrder.status} showLabels className="mt-5" />
 
-              <div className="p-4 bg-cyan-50/70 border border-cyan-200 rounded-xl">
-                <div className="text-xs font-bold text-cyan-900 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Truck className="w-4 h-4 text-cyan-700" />
-                    佐川急便 (国内配送)
-                  </span>
-                </div>
-                <div className="mt-2 text-lg font-black font-mono text-cyan-950">
-                  {currentOrder.sagawaTracking}
-                </div>
-                <div className="mt-2 pt-2 border-t border-cyan-200 flex items-center justify-between text-xs">
-                  <span className="text-cyan-700 text-[11px]">{currentOrder.hubName}引継済</span>
-                  <a
-                    href={getSagawaTrackingUrl(currentOrder.sagawaTracking)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-cyan-800 font-bold hover:underline flex items-center gap-1"
-                  >
-                    佐川急便サイトで追跡 <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            {/* Delivery Items & Actions */}
-            <div className="border border-slate-200 rounded-xl p-4 bg-white">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-800">
-                    今回の納品予定品目 (合計: {currentOrder.totalQty} 箱/本)
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    シンガポール調達ハブより直接出荷された医療用製剤
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onOpenTracking(currentOrder)}
-                    className="px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1.5 transition-colors shadow-2xs"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    全行程タイムライン詳細
-                  </button>
-                  <button
-                    onClick={() => onOpenDeliverySlip(currentOrder)}
-                    className="px-3 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg flex items-center gap-1.5 border border-slate-300 transition-colors"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-slate-500" />
-                    納品伝票・インボイス表示
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-3 space-y-2">
-                {currentOrder.items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-lg text-xs"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-900">{item.name}</span>
-                    </div>
-                    <div className="font-bold text-blue-700 text-sm">
-                      数量: {item.qty} {item.unit}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Receiving Checklist Notice for Clinic Staff */}
-            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 text-xs">
-              <div className="flex items-center gap-2 text-amber-900 font-bold text-sm mb-1.5">
-                <AlertCircle className="w-4.5 h-4.5 text-amber-600" />
-                クリニック受付・看護部 荷受時の確認事項
-              </div>
-              <ul className="list-disc list-inside space-y-1 text-slate-700 leading-relaxed text-[11px]">
-                <li>
-                  <strong className="text-slate-900">納品検品:</strong>{' '}
-                  外箱を開封し納品数量とバイアル破損がないことを確認の上、直ちに所定の保管場所へ収納してください。
-                </li>
-                <li>
-                  <strong className="text-slate-900">受領印押印:</strong>{' '}
-                  検品完了後、佐川急便端末および納品伝票へ受領印を押印してください。
-                </li>
-              </ul>
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={() => onOpenDeliverySlip(currentOrder)}
+                className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-lg text-sm border border-slate-300 cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <FileText className="w-4 h-4" />
+                納品伝票
+              </button>
+              <button
+                onClick={() => onOpenTracking(currentOrder)}
+                className="pl-4 pr-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm cursor-pointer inline-flex items-center gap-1"
+              >
+                配送の経過を見る
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-500">現在、配送中の発注はありません。</p>
+        )}
+      </Card>
+
+      {currentOrder && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 2. お届け内容 */}
+          <Card className="p-5 sm:p-6">
+            <SectionTitle
+              title="お届け内容"
+              right={
+                <span className="text-sm text-slate-500">
+                  合計 <span className="text-lg font-bold text-slate-900">{currentOrder.totalQty}</span> 箱
+                </span>
+              }
+            />
+            <ul className="mt-3 divide-y divide-slate-100">
+              {currentOrder.items.map((item, idx) => (
+                <li key={idx} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="flex items-center gap-2 text-base font-medium text-slate-800">
+                    <Package className="w-4 h-4 text-slate-400" />
+                    {item.name}
+                  </span>
+                  <span className="text-base font-bold text-slate-900 tabular-nums">
+                    {item.qty}
+                    <span className="ml-0.5 text-sm font-medium text-slate-500">{item.unit}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3 text-xs text-slate-400">
+              インボイス番号: <span className="font-mono">{currentOrder.invoiceNo}</span>
+            </div>
+          </Card>
+
+          {/* 3. 追跡番号 */}
+          <Card className="p-5 sm:p-6">
+            <SectionTitle title="追跡番号" desc="配送会社のサイトで詳しい位置を確認できます" />
+            <ul className="mt-3 divide-y divide-slate-100">
+              {[
+                {
+                  icon: Plane,
+                  label: 'FedEx(シンガポール→日本)',
+                  no: currentOrder.fedexTracking,
+                  url: getFedexTrackingUrl(currentOrder.fedexTracking),
+                },
+                {
+                  icon: Truck,
+                  label: `佐川急便(${currentOrder.hubName}→クリニック)`,
+                  no: currentOrder.sagawaTracking,
+                  url: getSagawaTrackingUrl(currentOrder.sagawaTracking),
+                },
+              ].map((t) => {
+                const Icon = t.icon;
+                return (
+                  <li key={t.label} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <Icon className="w-3.5 h-3.5" />
+                        {t.label}
+                      </div>
+                      <div className="mt-0.5 text-lg font-bold font-mono text-slate-900 tracking-wide">
+                        {t.no}
+                      </div>
+                    </div>
+                    <a
+                      href={t.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 px-3 py-1.5 text-sm font-semibold text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-50 inline-flex items-center gap-1"
+                    >
+                      追跡
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
         </div>
       )}
 
-      {/* Past Delivery Records for this clinic */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6">
-        <h3 className="text-base font-bold text-slate-800 mb-1 flex items-center gap-2">
-          <FileText className="w-4.5 h-4.5 text-blue-600" />
-          当院宛 過去の納品伝票・発注履歴アーカイブ
-        </h3>
-        <p className="text-xs text-slate-500 mb-4">
-          過去に納品完了した定期便の伝票、インボイス、受領記録を確認・再印刷できます。
-        </p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* 4. クリニック情報 */}
+        <Card className="p-5 sm:p-6">
+          <SectionTitle title="お届け先" />
+          <dl className="mt-3 space-y-2.5 text-sm">
+            <div className="flex gap-3">
+              <dt className="w-16 shrink-0 text-slate-500 flex items-center gap-1">
+                <User className="w-3.5 h-3.5" />院長
+              </dt>
+              <dd className="font-medium text-slate-900">{clinic.doctor || '—'} 先生</dd>
+            </div>
+            <div className="flex gap-3">
+              <dt className="w-16 shrink-0 text-slate-500 flex items-center gap-1">
+                <Phone className="w-3.5 h-3.5" />電話
+              </dt>
+              <dd className="font-mono text-slate-900">{clinic.tel}</dd>
+            </div>
+            <div className="flex gap-3">
+              <dt className="w-16 shrink-0 text-slate-500 flex items-start gap-1 pt-0.5">
+                <MapPin className="w-3.5 h-3.5 mt-0.5" />住所
+              </dt>
+              <dd className="text-slate-900 leading-relaxed">
+                〒{clinic.zip}
+                <br />
+                {clinic.address}
+              </dd>
+            </div>
+          </dl>
+        </Card>
 
-        {clinicOrders.length === 0 ? (
-          <div className="text-center py-8 text-xs text-slate-400">
-            過去の納品履歴はありません。
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-            {clinicOrders.map((ord) => (
-              <div
-                key={ord.id}
-                className="p-3.5 sm:p-4 hover:bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900 text-sm">
-                      {ord.batchName}
-                    </span>
-                    <span className="font-mono text-slate-500">({ord.invoiceNo})</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                      受領済
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-2">
-                    <span>発注日: {ord.orderDate}</span>
-                    <span>•</span>
-                    <span>納品日: {ord.actualDelivery || ord.estimatedDelivery}</span>
-                    <span>•</span>
-                    <span>数量: {ord.totalQty}箱</span>
-                    <span>•</span>
-                    <span className="font-mono text-purple-700">FedEx: {ord.fedexTracking}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-end sm:self-auto">
-                  <button
-                    onClick={() => onOpenTracking(ord)}
-                    className="px-2.5 py-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded border border-blue-200 transition-colors"
-                  >
-                    履歴詳細
-                  </button>
-                  <button
-                    onClick={() => onOpenDeliverySlip(ord)}
-                    className="px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 transition-colors flex items-center gap-1"
-                  >
-                    <FileText className="w-3 h-3 text-slate-500" />
-                    納品伝票
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 5. 荷受時の確認事項 */}
+        <Card className="p-5 sm:p-6 bg-amber-50/40 border-amber-200">
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-amber-600" />
+            荷物を受け取ったら
+          </h2>
+          <ol className="mt-3 space-y-2.5 text-sm text-slate-700 leading-relaxed">
+            <li className="flex gap-2.5">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center">1</span>
+              外箱を開け、数量とバイアルの破損がないか確認し、すぐに所定の保管場所へ収納してください。
+            </li>
+            <li className="flex gap-2.5">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center">2</span>
+              確認後、佐川急便の端末と納品伝票に受領印を押してください。
+            </li>
+          </ol>
+        </Card>
       </div>
+
+      {/* 6. これまでの発注 */}
+      <Card className="overflow-hidden">
+        <div className="p-5 sm:p-6 pb-3 sm:pb-3">
+          <SectionTitle title="これまでの発注" desc="過去の納品伝票の確認・再印刷ができます" />
+        </div>
+        {pastOrders.length === 0 ? (
+          <div className="px-6 pb-8 text-sm text-slate-500">過去の発注はありません。</div>
+        ) : (
+          <ul className="divide-y divide-slate-100 border-t border-slate-100">
+            {pastOrders.map((ord) => {
+              const delivered = ord.status === 'DELIVERED';
+              return (
+                <li
+                  key={ord.id}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto] gap-x-4 gap-y-2 items-center px-4 sm:px-6 py-3.5 hover:bg-slate-50 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="text-base font-bold text-slate-900">{ord.batchName}</div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {ord.totalQty}箱 ・ <span className="font-mono">{ord.invoiceNo}</span>
+                    </div>
+                  </div>
+                  <div className="text-right md:hidden">
+                    <DateCell
+                      date={formatDate(delivered ? ord.actualDelivery : ord.estimatedDelivery)}
+                      isDelivered={delivered}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <StatusChip status={ord.status} />
+                    <StageBar
+                      status={ord.status}
+                      className="hidden sm:block flex-1 min-w-[80px] max-w-[200px]"
+                    />
+                  </div>
+                  <div className="hidden md:block">
+                    <DateCell
+                      date={formatDate(delivered ? ord.actualDelivery : ord.estimatedDelivery)}
+                      isDelivered={delivered}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-1 md:w-[120px]">
+                    <button
+                      onClick={() => onOpenDeliverySlip(ord)}
+                      className="px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 font-medium rounded-lg text-xs cursor-pointer"
+                    >
+                      伝票
+                    </button>
+                    <button
+                      onClick={() => onOpenTracking(ord)}
+                      className="pl-3 pr-2 py-1.5 bg-white hover:bg-blue-50 text-blue-700 font-semibold rounded-lg text-xs border border-blue-200 cursor-pointer inline-flex items-center"
+                    >
+                      詳細
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 };
+

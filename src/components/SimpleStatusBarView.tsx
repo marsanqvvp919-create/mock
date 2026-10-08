@@ -1,17 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { OrderRecord, OrderStatus, CLINICS_MASTER } from '../data/clinicsData';
+import { Search, CheckCircle2, Download, ArrowUp, ArrowDown, ChevronRight, X } from 'lucide-react';
 import {
-  Search,
-  CheckCircle2,
-  Truck,
-  Plane,
-  Package,
-  Download,
-  ArrowUp,
-  ArrowDown,
-  ChevronRight,
-  X,
-} from 'lucide-react';
+  GROUPS,
+  STAGES,
+  StatusGroup,
+  getGroup,
+  getStageIdx,
+  formatDate,
+  shortName,
+  DateCell,
+} from './statusUi';
 
 interface SimpleStatusBarViewProps {
   orders: OrderRecord[];
@@ -26,96 +25,6 @@ interface SimpleStatusBarViewProps {
 type SortKey = 'status' | 'clinic' | 'region' | 'date';
 type SortOrder = 'asc' | 'desc';
 
-// 一覧で扱う状況グループ (細かいステータスを4つにまとめて見やすくする)
-type StatusGroup = 'DELIVERED' | 'OUT_FOR_DELIVERY' | 'DOMESTIC' | 'OVERSEAS';
-
-const GROUPS: {
-  key: StatusGroup;
-  label: string;
-  hint: string;
-  icon: React.ElementType;
-  chip: string;
-  bar: string;
-  tile: string;
-  tileActive: string;
-}[] = [
-  {
-    key: 'OVERSEAS',
-    label: '海外輸送・通関中',
-    hint: 'シンガポール〜日本の空港',
-    icon: Plane,
-    chip: 'bg-amber-50 text-amber-800 ring-amber-200',
-    bar: 'bg-amber-400',
-    tile: 'text-amber-700',
-    tileActive: 'ring-2 ring-amber-400 bg-amber-50',
-  },
-  {
-    key: 'DOMESTIC',
-    label: '佐川急便 引継済',
-    hint: '国内配送の準備中',
-    icon: Package,
-    chip: 'bg-sky-50 text-sky-800 ring-sky-200',
-    bar: 'bg-sky-400',
-    tile: 'text-sky-700',
-    tileActive: 'ring-2 ring-sky-400 bg-sky-50',
-  },
-  {
-    key: 'OUT_FOR_DELIVERY',
-    label: '配達中',
-    hint: 'クリニックへ向かっています',
-    icon: Truck,
-    chip: 'bg-blue-600 text-white ring-blue-600',
-    bar: 'bg-blue-600',
-    tile: 'text-blue-700',
-    tileActive: 'ring-2 ring-blue-500 bg-blue-50',
-  },
-  {
-    key: 'DELIVERED',
-    label: '受領済',
-    hint: 'クリニックに届きました',
-    icon: CheckCircle2,
-    chip: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-    bar: 'bg-emerald-500',
-    tile: 'text-emerald-700',
-    tileActive: 'ring-2 ring-emerald-500 bg-emerald-50',
-  },
-];
-
-const getGroup = (status: OrderStatus): StatusGroup => {
-  switch (status) {
-    case 'DELIVERED':
-      return 'DELIVERED';
-    case 'OUT_FOR_DELIVERY':
-      return 'OUT_FOR_DELIVERY';
-    case 'SAGAWA_HANDOVER':
-      return 'DOMESTIC';
-    default:
-      return 'OVERSEAS';
-  }
-};
-
-// 5段階のうち何段目まで進んでいるか (0〜4)
-const STAGES = ['SG梱包', 'FedEx空輸', '通関', '佐川配送', '納品'];
-const getStageIdx = (status: OrderStatus): number => {
-  switch (status) {
-    case 'ORDERED':
-    case 'PREPARING':
-      return 0;
-    case 'FEDEX_DISPATCHED':
-    case 'IN_TRANSIT_INTL':
-      return 1;
-    case 'CUSTOMS_CLEARANCE':
-      return 2;
-    case 'SAGAWA_HANDOVER':
-    case 'OUT_FOR_DELIVERY':
-      return 3;
-    case 'DELIVERED':
-      return 4;
-    default:
-      return 0;
-  }
-};
-
 const STATUS_ORDER: OrderStatus[] = [
   'ORDERED',
   'PREPARING',
@@ -127,19 +36,6 @@ const STATUS_ORDER: OrderStatus[] = [
   'DELIVERED',
 ];
 
-const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
-
-// "2026/10/06" または "2026/10/06 11:20" を { md: "10/6", wd: "火", time: "11:20" } に整形
-const formatDate = (value?: string | null) => {
-  if (!value) return null;
-  const [datePart, time] = value.split(' ');
-  const [y, m, d] = datePart.split('/').map(Number);
-  if (!y || !m || !d) return { md: value, wd: '', time: '' };
-  const wd = WEEKDAYS[new Date(y, m - 1, d).getDay()];
-  return { md: `${m}/${d}`, wd, time: time || '' };
-};
-
-const shortName = (name: string) => name.replace(/^湘南美容クリニック/, '') || name;
 
 export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
   orders,
@@ -503,25 +399,3 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
   );
 };
 
-const DateCell: React.FC<{
-  date: ReturnType<typeof formatDate>;
-  isDelivered: boolean;
-}> = ({ date, isDelivered }) => {
-  if (!date) return <span className="text-sm text-slate-400">未定</span>;
-  return (
-    <div>
-      <div className="text-[11px] text-slate-400 leading-tight">
-        {isDelivered ? '受領済' : '到着予定'}
-      </div>
-      <div
-        className={`text-lg font-bold tabular-nums leading-tight ${
-          isDelivered ? 'text-slate-500' : 'text-slate-900'
-        }`}
-      >
-        {date.md}
-        <span className="text-sm font-semibold">({date.wd})</span>
-        {date.time && <span className="ml-1 text-sm font-medium">{date.time}</span>}
-      </div>
-    </div>
-  );
-};
