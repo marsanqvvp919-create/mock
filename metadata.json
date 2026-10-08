@@ -1,0 +1,6 @@
+{
+  "name": "湘南美容クリニック 配送・受注ステータス管理システム",
+  "description": "シンガポール発・国際FedEx輸送および国内佐川急便クール便による各クリニック宛一括配送のステータス追跡・伝票管理ダッシュボード",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
