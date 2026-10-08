@@ -450,7 +450,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                   </div>
 
                   {/* 配送状況 */}
-                  <div className="col-span-2 md:col-span-1 flex items-center gap-3 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0">
                     <span
                       className={`inline-flex items-center gap-1 shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset ${group.chip}`}
                     >
@@ -458,7 +458,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                       {group.label}
                     </span>
                     <div
-                      className="flex-1 min-w-[80px] max-w-[200px] flex gap-0.5"
+                      className="hidden sm:flex flex-1 min-w-[80px] max-w-[200px] gap-0.5"
                       title={STAGES.map((s, i) => (i <= stageIdx ? `✓${s}` : s)).join(' → ')}
                     >
                       {STAGES.map((s, i) => (
@@ -478,7 +478,7 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
                   </div>
 
                   {/* 操作 */}
-                  <div className="col-span-2 md:col-span-1 flex items-center justify-end gap-1.5 md:w-[120px]">
+                  <div className="flex items-center justify-end gap-1 md:w-[120px]">
                     <button
                       onClick={() => onOpenDeliverySlip(order)}
                       className="px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 font-medium rounded-lg text-xs cursor-pointer"
