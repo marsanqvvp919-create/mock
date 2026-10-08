@@ -184,7 +184,7 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">湘南美容クリニック 配送・受注ステータス管理システム</span>
+            <span className="font-bold text-slate-700">湘南美容クリニック様 配送・受注ステータス管理システム</span>
             <span>•</span>
             <span>シンガポール医薬品供給ハブ ➔ FedEx国際空輸 ➔ 佐川急便</span>
           </div>
