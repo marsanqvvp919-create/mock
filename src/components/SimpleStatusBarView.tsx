@@ -1,24 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import {
-  OrderRecord,
-  OrderStatus,
-  CLINICS_MASTER,
-  getFedexTrackingUrl,
-  getSagawaTrackingUrl
-} from '../data/clinicsData';
+import { OrderRecord, OrderStatus, CLINICS_MASTER } from '../data/clinicsData';
 import {
   Search,
   CheckCircle2,
-  Clock,
-  ExternalLink,
+  Truck,
+  Plane,
+  Package,
   Download,
-  ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Layers,
-  MapPin,
-  Building,
-  RotateCcw
+  ChevronRight,
+  X,
 } from 'lucide-react';
 
 interface SimpleStatusBarViewProps {
@@ -31,13 +23,127 @@ interface SimpleStatusBarViewProps {
   onSelectClinic: (clinicId: string) => void;
 }
 
-type SortKey = 'status' | 'clinic' | 'region' | 'date' | 'qty' | 'hub' | 'invoice';
+type SortKey = 'status' | 'clinic' | 'region' | 'date';
 type SortOrder = 'asc' | 'desc';
+
+// 一覧で扱う状況グループ (細かいステータスを4つにまとめて見やすくする)
+type StatusGroup = 'DELIVERED' | 'OUT_FOR_DELIVERY' | 'DOMESTIC' | 'OVERSEAS';
+
+const GROUPS: {
+  key: StatusGroup;
+  label: string;
+  hint: string;
+  icon: React.ElementType;
+  chip: string;
+  bar: string;
+  tile: string;
+  tileActive: string;
+}[] = [
+  {
+    key: 'OVERSEAS',
+    label: '海外輸送・通関中',
+    hint: 'シンガポール〜日本の空港',
+    icon: Plane,
+    chip: 'bg-amber-50 text-amber-800 ring-amber-200',
+    bar: 'bg-amber-400',
+    tile: 'text-amber-700',
+    tileActive: 'ring-2 ring-amber-400 bg-amber-50',
+  },
+  {
+    key: 'DOMESTIC',
+    label: '佐川急便 引継済',
+    hint: '国内配送の準備中',
+    icon: Package,
+    chip: 'bg-sky-50 text-sky-800 ring-sky-200',
+    bar: 'bg-sky-400',
+    tile: 'text-sky-700',
+    tileActive: 'ring-2 ring-sky-400 bg-sky-50',
+  },
+  {
+    key: 'OUT_FOR_DELIVERY',
+    label: '配達中',
+    hint: 'クリニックへ向かっています',
+    icon: Truck,
+    chip: 'bg-blue-600 text-white ring-blue-600',
+    bar: 'bg-blue-600',
+    tile: 'text-blue-700',
+    tileActive: 'ring-2 ring-blue-500 bg-blue-50',
+  },
+  {
+    key: 'DELIVERED',
+    label: '受領済',
+    hint: 'クリニックに届きました',
+    icon: CheckCircle2,
+    chip: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+    bar: 'bg-emerald-500',
+    tile: 'text-emerald-700',
+    tileActive: 'ring-2 ring-emerald-500 bg-emerald-50',
+  },
+];
+
+const getGroup = (status: OrderStatus): StatusGroup => {
+  switch (status) {
+    case 'DELIVERED':
+      return 'DELIVERED';
+    case 'OUT_FOR_DELIVERY':
+      return 'OUT_FOR_DELIVERY';
+    case 'SAGAWA_HANDOVER':
+      return 'DOMESTIC';
+    default:
+      return 'OVERSEAS';
+  }
+};
+
+// 5段階のうち何段目まで進んでいるか (0〜4)
+const STAGES = ['SG梱包', 'FedEx空輸', '通関', '佐川配送', '納品'];
+const getStageIdx = (status: OrderStatus): number => {
+  switch (status) {
+    case 'ORDERED':
+    case 'PREPARING':
+      return 0;
+    case 'FEDEX_DISPATCHED':
+    case 'IN_TRANSIT_INTL':
+      return 1;
+    case 'CUSTOMS_CLEARANCE':
+      return 2;
+    case 'SAGAWA_HANDOVER':
+    case 'OUT_FOR_DELIVERY':
+      return 3;
+    case 'DELIVERED':
+      return 4;
+    default:
+      return 0;
+  }
+};
+
+const STATUS_ORDER: OrderStatus[] = [
+  'ORDERED',
+  'PREPARING',
+  'FEDEX_DISPATCHED',
+  'IN_TRANSIT_INTL',
+  'CUSTOMS_CLEARANCE',
+  'SAGAWA_HANDOVER',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+];
+
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+// "2026/10/06" または "2026/10/06 11:20" を { md: "10/6", wd: "火", time: "11:20" } に整形
+const formatDate = (value?: string | null) => {
+  if (!value) return null;
+  const [datePart, time] = value.split(' ');
+  const [y, m, d] = datePart.split('/').map(Number);
+  if (!y || !m || !d) return { md: value, wd: '', time: '' };
+  const wd = WEEKDAYS[new Date(y, m - 1, d).getDay()];
+  return { md: `${m}/${d}`, wd, time: time || '' };
+};
+
+const shortName = (name: string) => name.replace(/^湘南美容クリニック/, '') || name;
 
 export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
   orders,
   batchName,
-  isCurrentBatch,
   onOpenTracking,
   onOpenDeliverySlip,
   onExportCsv,
@@ -45,99 +151,36 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [hubFilter, setHubFilter] = useState<'ALL' | 'NRT' | 'KIX'>('ALL');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DELIVERED' | 'IN_TRANSIT'>('ALL');
-
-  // Sorting state
+  const [groupFilter, setGroupFilter] = useState<StatusGroup | 'ALL'>('ALL');
   const [sortBy, setSortBy] = useState<SortKey>('status');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc'); // asc = in transit first for status
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
-  // Calculate 5-stage progress value (0 to 100%) and stage index (0 to 4)
-  const getProgressInfo = (status: OrderStatus) => {
-    switch (status) {
-      case 'ORDERED':
-        return {
-          percent: 20,
-          stageIdx: 0,
-          label: '発注確定',
-          color: 'bg-slate-400',
-          textColor: 'text-slate-700',
-        };
-      case 'PREPARING':
-        return {
-          percent: 30,
-          stageIdx: 0,
-          label: 'シンガポール梱包中',
-          color: 'bg-amber-500',
-          textColor: 'text-amber-800',
-        };
-      case 'FEDEX_DISPATCHED':
-        return {
-          percent: 45,
-          stageIdx: 1,
-          label: 'FedEx シンガポール集荷済',
-          color: 'bg-purple-500',
-          textColor: 'text-purple-800',
-        };
-      case 'IN_TRANSIT_INTL':
-        return {
-          percent: 60,
-          stageIdx: 1,
-          label: 'FedEx 国際航空輸送中',
-          color: 'bg-indigo-500',
-          textColor: 'text-indigo-800',
-        };
-      case 'CUSTOMS_CLEARANCE':
-        return {
-          percent: 75,
-          stageIdx: 2,
-          label: '日本到着・通関中',
-          color: 'bg-blue-500',
-          textColor: 'text-blue-800',
-        };
-      case 'SAGAWA_HANDOVER':
-        return {
-          percent: 85,
-          stageIdx: 3,
-          label: '佐川急便 引継済',
-          color: 'bg-cyan-500',
-          textColor: 'text-cyan-800',
-        };
-      case 'OUT_FOR_DELIVERY':
-        return {
-          percent: 92,
-          stageIdx: 3,
-          label: '佐川急便 配達中',
-          color: 'bg-teal-500',
-          textColor: 'text-teal-800',
-        };
-      case 'DELIVERED':
-        return {
-          percent: 100,
-          stageIdx: 4,
-          label: '配達完了 (受領済)',
-          color: 'bg-emerald-500',
-          textColor: 'text-emerald-800',
-        };
-      default:
-        return {
-          percent: 10,
-          stageIdx: 0,
-          label: '受付中',
-          color: 'bg-slate-400',
-          textColor: 'text-slate-700',
-        };
-    }
-  };
+  const groupCounts = useMemo(() => {
+    const counts: Record<StatusGroup, number> = {
+      DELIVERED: 0,
+      OUT_FOR_DELIVERY: 0,
+      DOMESTIC: 0,
+      OVERSEAS: 0,
+    };
+    orders.forEach((o) => counts[getGroup(o.status)]++);
+    return counts;
+  }, [orders]);
 
-  const STAGES_HEADER = [
-    { label: '① SG発注・梱包', desc: 'シンガポール' },
-    { label: '② FedEx国際空輸', desc: '航空便輸送' },
-    { label: '③ 日本通関審査', desc: '成田 / 関西保税' },
-    { label: '④ 佐川急便', desc: '国内配送' },
-    { label: '⑤ クリニック納品', desc: '受領完了' },
-  ];
+  // 未完了の注文で最も多い到着予定日 (バッチ全体の見出しに使う)
+  const mainEta = useMemo(() => {
+    const tally: Record<string, number> = {};
+    orders
+      .filter((o) => o.status !== 'DELIVERED')
+      .forEach((o) => {
+        tally[o.estimatedDelivery] = (tally[o.estimatedDelivery] || 0) + 1;
+      });
+    const top = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
+    return top ? formatDate(top[0]) : null;
+  }, [orders]);
 
-  // Toggle sort handler
+  const deliveredCount = groupCounts.DELIVERED;
+  const allDone = orders.length > 0 && deliveredCount === orders.length;
+
   const handleSortChange = (key: SortKey) => {
     if (sortBy === key) {
       setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -147,40 +190,29 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
     }
   };
 
-  // Filtered and Sorted orders
-  const sortedAndFilteredOrders = useMemo(() => {
-    // 1. Filter
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
     const filtered = orders.filter((o) => {
       const matchSearch =
-        search === '' ||
-        o.clinicName.toLowerCase().includes(search.toLowerCase()) ||
-        o.doctor.toLowerCase().includes(search.toLowerCase()) ||
-        o.fedexTracking.includes(search) ||
-        o.sagawaTracking.includes(search) ||
-        o.invoiceNo.toLowerCase().includes(search.toLowerCase()) ||
-        o.address.toLowerCase().includes(search.toLowerCase()) ||
-        o.region.toLowerCase().includes(search.toLowerCase());
-
+        q === '' ||
+        o.clinicName.toLowerCase().includes(q) ||
+        o.doctor.toLowerCase().includes(q) ||
+        o.fedexTracking.includes(q) ||
+        o.sagawaTracking.includes(q) ||
+        o.invoiceNo.toLowerCase().includes(q) ||
+        o.address.toLowerCase().includes(q) ||
+        o.region.toLowerCase().includes(q);
       const matchHub = hubFilter === 'ALL' || o.hub === hubFilter;
-
-      const matchStatus =
-        statusFilter === 'ALL' ||
-        (statusFilter === 'DELIVERED' && o.status === 'DELIVERED') ||
-        (statusFilter === 'IN_TRANSIT' && o.status !== 'DELIVERED');
-
-      return matchSearch && matchHub && matchStatus;
+      const matchGroup = groupFilter === 'ALL' || getGroup(o.status) === groupFilter;
+      return matchSearch && matchHub && matchGroup;
     });
 
-    // 2. Sort
-    return filtered.sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
-        case 'status': {
-          const pA = getProgressInfo(a.status).percent;
-          const pB = getProgressInfo(b.status).percent;
-          cmp = pA - pB;
+        case 'status':
+          cmp = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
           break;
-        }
         case 'clinic':
           cmp = a.clinicName.localeCompare(b.clinicName, 'ja');
           break;
@@ -188,421 +220,307 @@ export const SimpleStatusBarView: React.FC<SimpleStatusBarViewProps> = ({
           cmp = a.region.localeCompare(b.region, 'ja');
           break;
         case 'date': {
-          const dateA = a.actualDelivery || a.estimatedDelivery || '';
-          const dateB = b.actualDelivery || b.estimatedDelivery || '';
-          cmp = dateA.localeCompare(dateB);
+          const dA = a.actualDelivery || a.estimatedDelivery || '';
+          const dB = b.actualDelivery || b.estimatedDelivery || '';
+          cmp = dA.localeCompare(dB);
           break;
         }
-        case 'qty':
-          cmp = a.totalQty - b.totalQty;
-          break;
-        case 'hub':
-          cmp = a.hub.localeCompare(b.hub);
-          break;
-        case 'invoice':
-          cmp = a.invoiceNo.localeCompare(b.invoiceNo);
-          break;
-        default:
-          cmp = 0;
       }
+      if (cmp === 0) cmp = a.clinicName.localeCompare(b.clinicName, 'ja');
       return sortOrder === 'asc' ? cmp : -cmp;
     });
-  }, [orders, search, hubFilter, statusFilter, sortBy, sortOrder]);
+  }, [orders, search, hubFilter, groupFilter, sortBy, sortOrder]);
 
-  // Batch average progress
-  const avgProgress = useMemo(() => {
-    if (orders.length === 0) return 0;
-    const sum = orders.reduce((acc, o) => acc + getProgressInfo(o.status).percent, 0);
-    return Math.round(sum / orders.length);
-  }, [orders]);
+  const openClinic = (order: OrderRecord) => {
+    const match = CLINICS_MASTER.find(
+      (c) => c.id === order.clinicId || c.name === order.clinicName
+    );
+    onSelectClinic(match ? match.id : CLINICS_MASTER[0].id);
+  };
 
-  const deliveredCount = orders.filter((o) => o.status === 'DELIVERED').length;
-  const inTransitCount = orders.length - deliveredCount;
+  const SortHeader: React.FC<{ k: SortKey; label: string; className?: string }> = ({
+    k,
+    label,
+    className = '',
+  }) => {
+    const active = sortBy === k;
+    return (
+      <button
+        onClick={() => handleSortChange(k)}
+        className={`inline-flex items-center gap-1 font-semibold cursor-pointer hover:text-slate-900 ${
+          active ? 'text-slate-900' : 'text-slate-500'
+        } ${className}`}
+      >
+        {label}
+        {active &&
+          (sortOrder === 'asc' ? (
+            <ArrowUp className="w-3 h-3" />
+          ) : (
+            <ArrowDown className="w-3 h-3" />
+          ))}
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-4">
-      {/* 1. Overall Batch Progress Bar (全体の棒状ステータス) */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+      {/* 1. サマリー: いつ届くか + 状況ごとの件数 */}
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 sm:p-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-500">
-                {batchName}
-              </span>
-            </div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
-              一括発注 配送進捗ステータス
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-3 text-xs bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-            <span className="font-bold text-slate-700">
-              全体進捗: <span className="text-blue-600 font-mono text-sm">{avgProgress}%</span>
-            </span>
-            <span className="text-slate-300">|</span>
-            <span className="text-emerald-700 font-bold">
-              配達完了: {deliveredCount} 院
-            </span>
-            {inTransitCount > 0 && (
-              <>
-                <span className="text-slate-300">|</span>
-                <span className="text-blue-700 font-bold">
-                  配送中: {inTransitCount} 院
-                </span>
-              </>
+            <p className="text-sm font-medium text-slate-500">{batchName}</p>
+            {allDone ? (
+              <h2 className="mt-1 text-2xl sm:text-3xl font-bold text-emerald-700 flex items-center gap-2">
+                <CheckCircle2 className="w-7 h-7" />
+                全{orders.length}院に納品完了
+              </h2>
+            ) : (
+              <h2 className="mt-1 text-2xl sm:text-3xl font-bold text-slate-900">
+                {mainEta ? (
+                  <>
+                    <span className="text-blue-700">
+                      {mainEta.md}
+                      <span className="text-xl sm:text-2xl">({mainEta.wd})</span>
+                    </span>{' '}
+                    到着予定
+                  </>
+                ) : (
+                  '配送状況'
+                )}
+              </h2>
             )}
           </div>
+          <p className="text-base text-slate-600">
+            <span className="text-3xl font-bold text-slate-900 tabular-nums">{deliveredCount}</span>
+            <span className="text-slate-400"> / {orders.length} 院</span> 受領済
+          </p>
         </div>
 
-        {/* The Big Overall Progress Bar */}
-        <div className="mt-3">
-          <div className="w-full bg-slate-100 rounded-full h-3.5 overflow-hidden p-0.5 border border-slate-200">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                avgProgress === 100
-                  ? 'bg-emerald-500'
-                  : 'bg-gradient-to-r from-blue-500 via-cyan-500 to-indigo-600'
-              }`}
-              style={{ width: `${avgProgress}%` }}
-            ></div>
-          </div>
-
-          {/* 5 Stage Checkpoints */}
-          <div className="grid grid-cols-5 gap-1 mt-2.5 text-center">
-            {STAGES_HEADER.map((st, i) => {
-              const isPast =
-                avgProgress >= (i + 1) * 20 || (i === 4 && avgProgress === 100);
-              const isCurrent =
-                avgProgress >= i * 20 && avgProgress < (i + 1) * 20;
-
-              return (
-                <div key={i} className="flex flex-col items-center">
-                  <span
-                    className={`text-[11px] font-bold ${
-                      isPast
-                        ? 'text-emerald-700'
-                        : isCurrent
-                        ? 'text-blue-700'
-                        : 'text-slate-400'
-                    }`}
-                  >
-                    {st.label}
-                  </span>
-                  <span className="text-[10px] text-slate-400 mt-0.5 hidden sm:inline">
-                    {st.desc}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* 2. Controls: Search, Airport Filter, Status Filter & Sorting */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-3.5 space-y-3">
-        {/* Top Controls Row: Search + Airport filter + CSV Export */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
-          {/* Search Input */}
-          <div className="relative w-full md:w-80">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="クリニック名、院長名、追跡番号、都道府県で検索..."
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800"
-            />
-          </div>
-
-          {/* Airport & Status Filters */}
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-between md:justify-end">
-            {/* Airport */}
-            <div className="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200">
-              <button
-                onClick={() => setHubFilter('ALL')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
-                  hubFilter === 'ALL'
-                    ? 'bg-white text-slate-900 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                全空港 ({orders.length})
-              </button>
-              <button
-                onClick={() => setHubFilter('NRT')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
-                  hubFilter === 'NRT'
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                成田 NRT ({orders.filter((o) => o.hub === 'NRT').length})
-              </button>
-              <button
-                onClick={() => setHubFilter('KIX')}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
-                  hubFilter === 'KIX'
-                    ? 'bg-indigo-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                関西 KIX ({orders.filter((o) => o.hub === 'KIX').length})
-              </button>
-            </div>
-
-            {/* Status Filter */}
-            <div className="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200">
-              <button
-                onClick={() => setStatusFilter('ALL')}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium cursor-pointer ${
-                  statusFilter === 'ALL'
-                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                すべて
-              </button>
-              <button
-                onClick={() => setStatusFilter('IN_TRANSIT')}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium cursor-pointer ${
-                  statusFilter === 'IN_TRANSIT'
-                    ? 'bg-blue-600 text-white shadow-2xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                配送中
-              </button>
-              <button
-                onClick={() => setStatusFilter('DELIVERED')}
-                className={`px-2.5 py-1.5 rounded-md text-xs font-medium cursor-pointer ${
-                  statusFilter === 'DELIVERED'
-                    ? 'bg-emerald-600 text-white shadow-2xs font-bold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                完了
-              </button>
-            </div>
-
-            {/* CSV export */}
-            <button
-              onClick={onExportCsv}
-              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg flex items-center gap-1 shadow-2xs cursor-pointer text-xs"
-            >
-              <Download className="w-3.5 h-3.5" />
-              CSV
-            </button>
-          </div>
-        </div>
-
-        {/* Sorting Controls Bar (クリニックごとのソート機能) */}
-        <div className="pt-2 border-t border-slate-150 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-slate-500 font-bold flex items-center gap-1 shrink-0 mr-1">
-              <ArrowUpDown className="w-3.5 h-3.5 text-blue-600" />
-              並び替え:
-            </span>
-
-            {/* Sort Buttons */}
-            {[
-              { key: 'status' as SortKey, label: '進捗ステータス' },
-              { key: 'clinic' as SortKey, label: 'クリニック名' },
-              { key: 'region' as SortKey, label: '都道府県・エリア' },
-              { key: 'date' as SortKey, label: '到着・受領日' },
-              { key: 'qty' as SortKey, label: '箱数・数量' },
-              { key: 'hub' as SortKey, label: '空港便(NRT/KIX)' },
-            ].map((btn) => {
-              const isActive = sortBy === btn.key;
-              return (
-                <button
-                  key={btn.key}
-                  onClick={() => handleSortChange(btn.key)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1 ${
-                    isActive
-                      ? 'bg-blue-50 text-blue-800 font-bold border border-blue-300'
-                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
-                  }`}
-                >
-                  {btn.label}
-                  {isActive && (
-                    sortOrder === 'asc' ? (
-                      <ArrowUp className="w-3 h-3 text-blue-700" />
-                    ) : (
-                      <ArrowDown className="w-3 h-3 text-blue-700" />
-                    )
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="text-[11px] text-slate-500 font-medium ml-auto">
-            該当: <span className="font-bold text-slate-900">{sortedAndFilteredOrders.length}</span> 件表示中
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Simple List with Bar-Shaped Status for Each Clinic */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="divide-y divide-slate-100">
-          {sortedAndFilteredOrders.length === 0 ? (
-            <div className="p-12 text-center text-slate-400 text-xs">
-              条件に一致するクリニックがありません。検索キーワードや絞り込み条件をご確認ください。
-            </div>
-          ) : (
-            sortedAndFilteredOrders.map((order) => {
-              const info = getProgressInfo(order.status);
-              const isDelivered = order.status === 'DELIVERED';
-
-              return (
-                <div
-                  key={order.id}
-                  className="p-3.5 sm:p-4 hover:bg-slate-50/70 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs"
-                >
-                  {/* Left: Clinic Info & Order Details */}
-                  <div className="lg:w-1/3">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span
-                        className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
-                          order.hub === 'NRT'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-indigo-100 text-indigo-800'
-                        }`}
-                      >
-                        {order.hub}便
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        {order.invoiceNo}
-                      </span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-[10px] text-slate-600 font-medium">
-                        {order.region}
-                      </span>
-                    </div>
-
-                    <h3
-                      onClick={() => {
-                        const match = CLINICS_MASTER.find(
-                          (c) => c.id === order.clinicId || c.name === order.clinicName
-                        );
-                        onSelectClinic(match ? match.id : CLINICS_MASTER[0].id);
-                      }}
-                      className="font-bold text-slate-900 text-sm mt-0.5 hover:text-blue-600 hover:underline cursor-pointer transition-colors inline-block"
-                      title="クリックしてこのクリニックの個別ビューへ移動"
-                    >
-                      {order.clinicName}
-                    </h3>
-
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
-                      <span>院長: {order.doctor || '—'}</span>
-                      <span className="text-slate-300">•</span>
-                      <span className="text-blue-700 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/50">
-                        数量: {order.totalQty}箱
-                      </span>
-                    </div>
-
-                    {/* Quick Tracking Links */}
-                    <div className="flex items-center gap-3 mt-1.5 text-[11px]">
-                      <a
-                        href={getFedexTrackingUrl(order.fedexTracking)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-purple-700 hover:underline font-mono flex items-center gap-0.5"
-                      >
-                        FedEx: {order.fedexTracking}
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
-                      <a
-                        href={getSagawaTrackingUrl(order.sagawaTracking)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-cyan-700 hover:underline font-mono flex items-center gap-0.5"
-                      >
-                        佐川: {order.sagawaTracking}
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
-                    </div>
-                  </div>
-
-                  {/* Center: The Bar-Shaped Status (棒状ステータスバー) */}
-                  <div className="lg:w-5/12 bg-slate-50/80 p-3 rounded-lg border border-slate-200">
-                    <div className="flex items-center justify-between text-[11px] mb-1.5">
-                      <span className={`font-bold flex items-center gap-1.5 ${info.textColor}`}>
-                        {isDelivered ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        ) : (
-                          <Clock className="w-4 h-4 text-blue-600" />
-                        )}
-                        {info.label}
-                      </span>
-                      <span className="font-mono font-bold text-slate-700">
-                        {info.percent}%
-                      </span>
-                    </div>
-
-                    {/* The Visual Progress Bar (棒状) */}
-                    <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          isDelivered
-                            ? 'bg-emerald-500'
-                            : 'bg-gradient-to-r from-blue-500 to-cyan-500'
-                        }`}
-                        style={{ width: `${info.percent}%` }}
-                      ></div>
-                    </div>
-
-                    {/* 5 Stage steps below the bar */}
-                    <div className="grid grid-cols-5 text-[9px] text-slate-400 text-center mt-1.5 font-medium">
-                      <span className={info.stageIdx >= 0 ? 'text-slate-800 font-bold' : ''}>
-                        ①SG梱包
-                      </span>
-                      <span className={info.stageIdx >= 1 ? 'text-slate-800 font-bold' : ''}>
-                        ②FedEx
-                      </span>
-                      <span className={info.stageIdx >= 2 ? 'text-slate-800 font-bold' : ''}>
-                        ③通関
-                      </span>
-                      <span className={info.stageIdx >= 3 ? 'text-slate-800 font-bold' : ''}>
-                        ④佐川急便
-                      </span>
-                      <span className={info.stageIdx >= 4 ? 'text-emerald-700 font-bold' : ''}>
-                        ⑤納品受領
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Right: Date & Action Buttons */}
-                  <div className="lg:w-1/4 flex lg:flex-col items-center lg:items-end justify-between gap-2">
-                    <div className="text-right">
-                      <div className="text-[10px] text-slate-400">
-                        {isDelivered ? '受領完了日' : '到着予定日'}
-                      </div>
-                      <div className="text-xs font-bold font-mono text-slate-800">
-                        {isDelivered ? order.actualDelivery : order.estimatedDelivery}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => onOpenTracking(order)}
-                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-xs border border-blue-200 transition-colors cursor-pointer shadow-2xs"
-                      >
-                        詳細
-                      </button>
-                      <button
-                        onClick={() => onOpenDeliverySlip(order)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs border border-slate-300 transition-colors cursor-pointer shadow-2xs"
-                      >
-                        伝票
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
+        {/* 状況の内訳バー */}
+        <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-slate-100">
+          {GROUPS.map((g) =>
+            groupCounts[g.key] > 0 ? (
+              <div
+                key={g.key}
+                className={g.bar}
+                style={{ width: `${(groupCounts[g.key] / Math.max(orders.length, 1)) * 100}%` }}
+                title={`${g.label}: ${groupCounts[g.key]}院`}
+              />
+            ) : null
           )}
         </div>
+
+        {/* 件数タイル (クリックで絞り込み) */}
+        <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          {[...GROUPS].reverse().map((g) => {
+            const Icon = g.icon;
+            const active = groupFilter === g.key;
+            const count = groupCounts[g.key];
+            return (
+              <button
+                key={g.key}
+                onClick={() => setGroupFilter(active ? 'ALL' : g.key)}
+                disabled={count === 0}
+                className={`text-left rounded-xl border border-slate-200 px-4 py-3 transition cursor-pointer disabled:cursor-default disabled:opacity-50 ${
+                  active ? g.tileActive : 'hover:bg-slate-50'
+                }`}
+              >
+                <div className={`flex items-center gap-1.5 text-sm font-semibold ${g.tile}`}>
+                  <Icon className="w-4 h-4" />
+                  {g.label}
+                </div>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span className="text-2xl font-bold text-slate-900 tabular-nums">{count}</span>
+                  <span className="text-sm text-slate-500">院</span>
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5 hidden sm:block">{g.hint}</div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 2. 検索・絞り込み */}
+      <section className="flex flex-col sm:flex-row gap-2 sm:items-center">
+        <div className="relative flex-1">
+          <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="クリニック名で検索(例: 梅田、札幌)"
+            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder:text-slate-400"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 text-sm">
+            {(
+              [
+                ['ALL', 'すべて'],
+                ['NRT', '東日本'],
+                ['KIX', '西日本'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setHubFilter(key)}
+                className={`px-3 py-1.5 rounded-lg font-semibold cursor-pointer ${
+                  hubFilter === key
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={onExportCsv}
+            className="px-3 py-2.5 bg-white hover:bg-slate-50 text-slate-700 font-semibold rounded-xl flex items-center gap-1.5 border border-slate-300 cursor-pointer text-sm"
+          >
+            <Download className="w-4 h-4" />
+            CSV
+          </button>
+        </div>
+      </section>
+
+      {(groupFilter !== 'ALL' || search) && (
+        <div className="flex items-center gap-2 text-sm text-slate-600">
+          <span>
+            <span className="font-bold text-slate-900">{rows.length}</span> 件を表示中
+          </span>
+          <button
+            onClick={() => {
+              setGroupFilter('ALL');
+              setSearch('');
+            }}
+            className="inline-flex items-center gap-1 text-blue-700 hover:underline cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            絞り込みを解除
+          </button>
+        </div>
+      )}
+
+      {/* 3. クリニック一覧 */}
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        {/* 列見出し (PCのみ) */}
+        <div className="hidden md:grid grid-cols-[minmax(0,1.6fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto] gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 text-xs">
+          <SortHeader k="clinic" label="クリニック" />
+          <SortHeader k="status" label="配送状況" />
+          <SortHeader k="date" label="到着予定 / 受領日時" />
+          <span className="w-[120px]" />
+        </div>
+
+        {rows.length === 0 ? (
+          <div className="p-12 text-center text-slate-500 text-sm">
+            該当するクリニックがありません。
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {rows.map((order) => {
+              const group = GROUPS.find((g) => g.key === getGroup(order.status))!;
+              const stageIdx = getStageIdx(order.status);
+              const isDelivered = order.status === 'DELIVERED';
+              const date = formatDate(isDelivered ? order.actualDelivery : order.estimatedDelivery);
+              const Icon = group.icon;
+
+              return (
+                <li
+                  key={order.id}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto] gap-x-4 gap-y-2 items-center px-4 sm:px-5 py-3.5 hover:bg-slate-50 transition-colors"
+                >
+                  {/* クリニック */}
+                  <div className="min-w-0">
+                    <button
+                      onClick={() => openClinic(order)}
+                      className="text-left text-base font-bold text-slate-900 hover:text-blue-700 hover:underline cursor-pointer truncate max-w-full"
+                      title={`${order.clinicName}の詳細ページへ`}
+                    >
+                      {shortName(order.clinicName)}
+                    </button>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {order.region} ・ {order.totalQty}箱
+                    </div>
+                  </div>
+
+                  {/* 到着日 (スマホでは右上に表示) */}
+                  <div className="text-right md:hidden">
+                    <DateCell date={date} isDelivered={isDelivered} />
+                  </div>
+
+                  {/* 配送状況 */}
+                  <div className="col-span-2 md:col-span-1 flex items-center gap-3 min-w-0">
+                    <span
+                      className={`inline-flex items-center gap-1 shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset ${group.chip}`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      {group.label}
+                    </span>
+                    <div
+                      className="flex-1 min-w-[80px] max-w-[200px] flex gap-0.5"
+                      title={STAGES.map((s, i) => (i <= stageIdx ? `✓${s}` : s)).join(' → ')}
+                    >
+                      {STAGES.map((s, i) => (
+                        <div
+                          key={s}
+                          className={`h-1.5 flex-1 rounded-full ${
+                            i <= stageIdx ? group.bar : 'bg-slate-200'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 到着日 (PC) */}
+                  <div className="hidden md:block">
+                    <DateCell date={date} isDelivered={isDelivered} />
+                  </div>
+
+                  {/* 操作 */}
+                  <div className="col-span-2 md:col-span-1 flex items-center justify-end gap-1.5 md:w-[120px]">
+                    <button
+                      onClick={() => onOpenDeliverySlip(order)}
+                      className="px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 font-medium rounded-lg text-xs cursor-pointer"
+                    >
+                      伝票
+                    </button>
+                    <button
+                      onClick={() => onOpenTracking(order)}
+                      className="pl-3 pr-2 py-1.5 bg-white hover:bg-blue-50 text-blue-700 font-semibold rounded-lg text-xs border border-blue-200 cursor-pointer inline-flex items-center"
+                    >
+                      追跡
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+};
+
+const DateCell: React.FC<{
+  date: ReturnType<typeof formatDate>;
+  isDelivered: boolean;
+}> = ({ date, isDelivered }) => {
+  if (!date) return <span className="text-sm text-slate-400">未定</span>;
+  return (
+    <div>
+      <div className="text-[11px] text-slate-400 leading-tight">
+        {isDelivered ? '受領済' : '到着予定'}
+      </div>
+      <div
+        className={`text-lg font-bold tabular-nums leading-tight ${
+          isDelivered ? 'text-slate-500' : 'text-slate-900'
+        }`}
+      >
+        {date.md}
+        <span className="text-sm font-semibold">({date.wd})</span>
+        {date.time && <span className="ml-1 text-sm font-medium">{date.time}</span>}
       </div>
     </div>
   );
